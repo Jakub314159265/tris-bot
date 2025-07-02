@@ -26,5 +26,5 @@ Combine commands (e.g., `!aad`) for quick moves.
 ## Setup
 
 1. Install dependencies: `pip install discord.py`
-2. Place your Discord api in `token.txt`
+2. Place your Discord api in `token.txt` file in the same directory as tris.py
 3. Run the bot: `python tris.py`
