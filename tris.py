@@ -46,20 +46,20 @@ def save_score(username, score, avatar_url, user_id, lines_cleared=0, game_time=
             entry["total_time"] = entry.get("total_time", 0) + game_time
             entry["username"] = username  # update username in case it changed
             entry["avatar_url"] = avatar_url  # update avatar
-            
+
             # Update data independently
             if score > entry.get("score", 0):
                 entry["score"] = score
                 entry["timestamp"] = datetime.now().isoformat()
-            
+
             if lines_cleared > entry.get("best_lines", 0):
                 entry["best_lines"] = lines_cleared
                 entry["best_lines_timestamp"] = datetime.now().isoformat()
-            
+
             if game_time > entry.get("best_time", 0):
                 entry["best_time"] = game_time
                 entry["best_time_timestamp"] = datetime.now().isoformat()
-            
+
             updated = True
             break
     if not updated:
@@ -241,7 +241,7 @@ async def cleanup_user_game(user_id):
                     user = guild.get_member(user_id)
                     if user:
                         break
-            
+
             if user:
                 username = getattr(user, "display_name", str(user))
                 avatar_url = str(user.avatar.url) if user.avatar else ""
@@ -360,7 +360,7 @@ async def update_display(ctx_or_msg, user_id):
                         user = guild.get_member(user_id)
                         if user:
                             break
-            
+
             if user:
                 username = getattr(user, "display_name", str(user))
                 avatar_url = str(user.avatar.url) if user.avatar else ""
@@ -459,7 +459,7 @@ async def highscores(ctx):
         title="🏆 Tris High Scores & Statistics",
         color=0xffd700
     )
-    
+
     for i, score_entry in enumerate(scores):
         rank = i + 1
         username = score_entry["username"]
@@ -467,14 +467,14 @@ async def highscores(ctx):
         date = datetime.fromisoformat(
             score_entry["timestamp"]).strftime("%m/%d")
         avatar_url = score_entry.get("avatar_url", "")
-        
+
         # get statistics
         games_played = score_entry.get("games_played", 1)
         total_lines = score_entry.get("total_lines", 0)
         total_time = score_entry.get("total_time", 0)
         best_lines = score_entry.get("best_lines", 0)
         best_time = score_entry.get("best_time", 0)
-        
+
         # get best achievement dates
         best_lines_date = ""
         best_time_date = ""
@@ -482,16 +482,16 @@ async def highscores(ctx):
             best_lines_date = f" ({datetime.fromisoformat(score_entry['best_lines_timestamp']).strftime('%m/%d')})"
         if "best_time_timestamp" in score_entry:
             best_time_date = f" ({datetime.fromisoformat(score_entry['best_time_timestamp']).strftime('%m/%d')})"
-        
+
         # calculate averages
         avg_score = score_val / games_played if games_played > 0 else 0
         avg_lines = total_lines / games_played if games_played > 0 else 0
         avg_time = total_time / games_played if games_played > 0 else 0
-        
+
         # use avatar as thumbnail for first place
         if i == 0 and avatar_url:
             embed.set_thumbnail(url=avatar_url)
-        
+
         # format statistics with individual best dates
         stats_text = (
             f"**Best Score:** {score_val:,} pts ({date})\n"
@@ -499,14 +499,14 @@ async def highscores(ctx):
             f"**Best Lines:** {best_lines}{best_lines_date} | **Total:** {total_lines:,} | **Avg:** {avg_lines:.1f}\n"
             f"**Longest game:** {best_time:.1f}s{best_time_date} | **Avg Time:** {avg_time:.1f}s"
         )
-        
+
         medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}."
         embed.add_field(
-            name=f"{medal} {username}", 
-            value=stats_text, 
+            name=f"{medal} {username}",
+            value=stats_text,
             inline=False
         )
-    
+
     embed.set_footer(text=":3")
     await ctx.send(embed=embed)
 
@@ -575,28 +575,28 @@ async def on_reaction_add(reaction, user):
     """Handle reaction-based game controls"""
     if user.bot:
         return
-    
+
     # check if this is a game message
     user_id = user.id
     if user_id not in messages or messages[user_id].id != reaction.message.id:
         return
-    
+
     # check if user has an active game
     game = games.get(user_id)
     if not game or game.game_over:
         return
-    
+
     # get the command from reaction
     emoji = str(reaction.emoji)
     if emoji not in REACTION_CONTROLS:
         return
-    
+
     command = REACTION_CONTROLS[emoji]
-    
+
     # store state before action
     prev_state = (game.px, game.py, [row[:] for row in game.piece], [
                   row[:] for row in game.board], game.score)
-    
+
     # execute
     if command == 'a':
         game.move_left()
@@ -619,14 +619,14 @@ async def on_reaction_add(reaction, user):
                 game.get_game_time()
             )
             game._logged = True
-    
+
     # check if state changed
     new_state = (game.px, game.py, [row[:] for row in game.piece], [
                  row[:] for row in game.board], game.score)
-    
+
     if prev_state != new_state or game.game_over:
         await update_display(reaction.message, user_id)
-    
+
     # remove the reaction for cleaner UI
     try:
         await reaction.remove(user)
@@ -655,12 +655,12 @@ async def delall(ctx):
         if not channel.permissions_for(ctx.guild.me).read_message_history:
             await status_msg.edit(content="No permission to read message history in this channel.")
             return
-            
+
         async for message in channel.history(limit=1000):
             # skip the current delall command message and status message
             if message.id == ctx.message.id or message.id == status_msg.id:
                 continue
-                
+
             # delete if message is from the bot
             if message.author == bot.user:
                 try:
@@ -690,7 +690,7 @@ async def delall(ctx):
                     await asyncio.sleep(0.1)
                 except (discord.NotFound, discord.Forbidden):
                     pass
-                    
+
         try:
             await status_msg.edit(content=f"Deleted {deleted_count} bot and command messages from this channel.")
             await asyncio.sleep(5)
