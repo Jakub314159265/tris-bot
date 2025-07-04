@@ -65,7 +65,8 @@ def save_score(username, score, avatar_url, user_id):
 def get_highscores(limit=10):
     """Get top scores from log file"""
     scores = load_scores()
-    scores.sort(key=lambda x: (-x["score"], x["timestamp"])) # sort looking at score, and timestamp if tie
+    # sort looking at score, and timestamp if tie
+    scores.sort(key=lambda x: (-x["score"], x["timestamp"]))
     return scores[:limit]
 
 
@@ -80,7 +81,7 @@ def render_board(board, piece=None, px=0, py=0):
                 px <= x < px + len(piece[0]) and
                     piece[y - py][x - px]):
                 cell = 2
-            line.append(EMOJI_MAP[cell]) # change to emojis
+            line.append(EMOJI_MAP[cell])  # change to emojis
         lines.append(''.join(line))
     return '\n'.join(lines)
 
@@ -89,15 +90,15 @@ def check_collision(board, piece, px, py):
     for y, row in enumerate(piece):
         for x, cell in enumerate(row):
             if cell:    # only check parts of the piece
-                bx, by = px + x, py + y # to board coords
-                if bx < 0 or bx >= WIDTH or by >= HEIGHT: # out of bounds
+                bx, by = px + x, py + y  # to board coords
+                if bx < 0 or bx >= WIDTH or by >= HEIGHT:  # out of bounds
                     return True
-                if by >= 0 and board[by][bx]: # overlap
+                if by >= 0 and board[by][bx]:  # overlap
                     return True
     return False
 
 
-def merge_piece(board, piece, px, py): # adds piece to board
+def merge_piece(board, piece, px, py):  # adds piece to board
     for y, row in enumerate(piece):
         for x, cell in enumerate(row):
             if cell:
@@ -107,15 +108,15 @@ def merge_piece(board, piece, px, py): # adds piece to board
 
 
 def clear_lines(board):
-    new_board = [row for row in board if not all(row)] # removes full lines
+    new_board = [row for row in board if not all(row)]  # removes full lines
     lines_cleared = HEIGHT - len(new_board)
     for _ in range(lines_cleared):
-        new_board.insert(0, [0] * WIDTH) # adds removed lines
+        new_board.insert(0, [0] * WIDTH)  # adds removed lines
     return new_board, lines_cleared
 
 
 class TetrisGame:
-    def __init__(self): # inits constants
+    def __init__(self):  # inits constants
         self.board = empty_board()
         self.score = 0
         self.game_over = False
@@ -159,7 +160,7 @@ class TetrisGame:
             return
         while not check_collision(self.board, self.piece, self.px, self.py + 1):
             self.py += 1
-            self.score += 2 # points for hard dropping
+            self.score += 2  # points for hard dropping
         self.land_piece()
 
     def land_piece(self):
@@ -245,7 +246,8 @@ async def update_display(ctx_or_msg, user_id):
                 save_score(
                     getattr(author, "display_name", str(author)),
                     game.score,
-                    str(getattr(getattr(author, "avatar", None), "url", "")) if getattr(author, "avatar", None) else "",
+                    str(getattr(getattr(author, "avatar", None), "url", "")
+                        ) if getattr(author, "avatar", None) else "",
                     getattr(author, "id", 0)
                 )
                 game._logged = True
@@ -289,6 +291,7 @@ async def tris(ctx):
     games[user_id] = TetrisGame()
     await update_display(ctx, user_id)
     tasks[user_id] = bot.loop.create_task(auto_drop(user_id))
+
 
 @bot.command(name="trishelp")
 async def trishelp_command(ctx):
@@ -338,7 +341,8 @@ async def highscores(ctx):
         rank = i + 1
         username = score_entry["username"]
         score_val = score_entry["score"]
-        date = datetime.fromisoformat(score_entry["timestamp"]).strftime("%m/%d")
+        date = datetime.fromisoformat(
+            score_entry["timestamp"]).strftime("%m/%d")
         avatar_url = score_entry.get("avatar_url", "")
         # Use avatar as thumbnail for first place, as icon for others
         if i == 0 and avatar_url:
