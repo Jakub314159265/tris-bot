@@ -507,7 +507,7 @@ async def highscores(ctx):
             inline=False
         )
 
-    embed.set_footer(text=":3")
+    embed.set_footer(text=">w<")
     await ctx.send(embed=embed)
 
 
