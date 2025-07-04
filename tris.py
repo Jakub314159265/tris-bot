@@ -182,12 +182,32 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True)
 
-games = {}
-messages = {}
-tasks = {}
+games = {}      # user_id -> TetrisGame instance
+messages = {}   # user_id -> discord.Message instance
+tasks = {}      # user_id -> asyncio.Task for auto-drop
+
+
+async def cleanup_user_game(user_id):
+    """Clean up all resources for a specific user's game"""
+    # Cancel auto-drop task
+    if user_id in tasks:
+        tasks[user_id].cancel()
+        tasks.pop(user_id, None)
+
+    # Remove message
+    if user_id in messages:
+        try:
+            await messages[user_id].delete()
+        except (discord.NotFound, discord.Forbidden):
+            pass
+        messages.pop(user_id, None)
+
+    # Remove game instance
+    games.pop(user_id, None)
 
 
 async def auto_drop(user_id):
+    """Auto-drop task - one per user"""
     try:
         while user_id in games and not games[user_id].game_over:
             game = games.get(user_id)
@@ -212,7 +232,9 @@ async def auto_drop(user_id):
     except asyncio.CancelledError:
         pass
     finally:
-        tasks.pop(user_id, None)
+        # Clean up task reference when done
+        if user_id in tasks:
+            tasks.pop(user_id, None)
 
 
 async def update_display(ctx_or_msg, user_id):
@@ -263,9 +285,8 @@ async def on_ready():
 async def tris(ctx):
     user_id = ctx.author.id
 
-    # Log final score if previous game existed
+    # Log final score if previous game existed and was completed
     if user_id in games and games[user_id].game_over and games[user_id].score > 0:
-        # Prevent duplicate log entries for the same game over
         if not hasattr(games[user_id], "_logged") or not games[user_id]._logged:
             save_score(
                 ctx.author.display_name,
@@ -275,21 +296,14 @@ async def tris(ctx):
             )
             games[user_id]._logged = True
 
-    # Cancel existing task
-    if user_id in tasks:
-        tasks[user_id].cancel()
+    # Clean up any existing game for this user
+    await cleanup_user_game(user_id)
 
-    # Remove old message if previous game existed and was over
-    if user_id in messages:
-        try:
-            await messages[user_id].delete()
-        except (discord.NotFound, discord.Forbidden):
-            pass
-        messages.pop(user_id, None)
-
-    # Start new game
+    # Start new game instance for this specific user
     games[user_id] = TetrisGame()
     await update_display(ctx, user_id)
+
+    # Start auto-drop task for this user only
     tasks[user_id] = bot.loop.create_task(auto_drop(user_id))
 
 
@@ -364,9 +378,9 @@ async def on_message(message):
         commands_str = message.content[1:].lower()
         valid_commands = {'a', 'd', 's', 'w', 'q'}
 
-        # Compound commands: only if all are valid and more than one
+        # Handle compound commands - affects only the sender's game
         if all(c in valid_commands for c in commands_str):
-            user_id = message.author.id
+            user_id = message.author.id  # Each user controls only their own game
             game = games.get(user_id)
             if game and not game.game_over:
                 prev_state = (game.px, game.py, [row[:] for row in game.piece], [
@@ -393,7 +407,7 @@ async def on_message(message):
                     pass
                 return
 
-        # Clean up single commands
+        # Clean up command messages
         if commands_str in ['tris', 'a', 'd', 's', 'w', 'q', 'trishelp', 'highscores']:
             try:
                 await message.delete()
@@ -401,6 +415,13 @@ async def on_message(message):
                 pass
 
     await bot.process_commands(message)
+
+
+@bot.event
+async def on_member_remove(member):
+    """Clean up games when users leave the server"""
+    await cleanup_user_game(member.id)
+
 
 with open("token.txt", "r") as f:
     bot.run(f.read().strip())
