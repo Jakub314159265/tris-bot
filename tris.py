@@ -48,47 +48,35 @@ def load_scores():
 def save_score(username, score, avatar_url, user_id, lines_cleared=0, game_time=0):
     """Save a score to tris.log file, updating individual bests independently"""
     scores = load_scores()
-    updated = False
     for entry in scores:
         if entry.get("user_id") == user_id:
-            entry["games_played"] = entry.get("games_played", 0) + 1
-            entry["total_lines"] = entry.get("total_lines", 0) + lines_cleared
-            entry["total_time"] = entry.get("total_time", 0) + game_time
-            entry["username"] = username  # update username in case it changed
-            entry["avatar_url"] = avatar_url  # update avatar
+            entry.update({
+                "games_played": entry.get("games_played", 0) + 1,
+                "total_lines": entry.get("total_lines", 0) + lines_cleared,
+                "total_time": entry.get("total_time", 0) + game_time,
+                "username": username,
+                "avatar_url": avatar_url
+            })
 
-            # Update data independently
+            # Update bests independently
             if score > entry.get("score", 0):
-                entry["score"] = score
-                entry["timestamp"] = datetime.now().isoformat()
-
+                entry.update(
+                    {"score": score, "timestamp": datetime.now().isoformat()})
             if lines_cleared > entry.get("best_lines", 0):
-                entry["best_lines"] = lines_cleared
-                entry["best_lines_timestamp"] = datetime.now().isoformat()
-
+                entry.update({"best_lines": lines_cleared,
+                             "best_lines_timestamp": datetime.now().isoformat()})
             if game_time > entry.get("best_time", 0):
-                entry["best_time"] = game_time
-                entry["best_time_timestamp"] = datetime.now().isoformat()
-
-            updated = True
+                entry.update(
+                    {"best_time": game_time, "best_time_timestamp": datetime.now().isoformat()})
             break
-    if not updated:
-        score_entry = {
-            "username": username,
-            "score": score,
-            "avatar_url": avatar_url,
-            "user_id": user_id,
-            "timestamp": datetime.now().isoformat(),
-            "games_played": 1,
-            "total_lines": lines_cleared,
-            "total_time": game_time,
-            "best_lines": lines_cleared,
-            "best_time": game_time,
-            "best_lines_timestamp": datetime.now().isoformat(),
-            "best_time_timestamp": datetime.now().isoformat()
-        }
-        scores.append(score_entry)
-    # rewrite all scores
+    else:
+        scores.append({
+            "username": username, "score": score, "avatar_url": avatar_url, "user_id": user_id,
+            "timestamp": datetime.now().isoformat(), "games_played": 1, "total_lines": lines_cleared,
+            "total_time": game_time, "best_lines": lines_cleared, "best_time": game_time,
+            "best_lines_timestamp": datetime.now().isoformat(), "best_time_timestamp": datetime.now().isoformat()
+        })
+
     with open("tris.log", "w") as f:
         for entry in scores:
             f.write(json.dumps(entry) + "\n")
@@ -148,13 +136,14 @@ def clear_lines(board):
 
 
 class TetrisGame:
-    def __init__(self):  # inits constants
+    def __init__(self):
         self.board = empty_board()
         self.score = 0
         self.game_over = False
         self.lines_cleared_total = 0
         self.start_time = time.time()
-        self.current_piece_type = None  # Track piece type
+        self.current_piece_type = None
+        self._logged = False
         self.spawn_piece()
 
     def spawn_piece(self):
@@ -181,40 +170,24 @@ class TetrisGame:
     def rotate(self):
         if self.game_over:
             return
-        
+
         if self.current_piece_type == 'I':
             rotated_piece = rotate_i_piece_center(self.piece)
             # Calculate offset to keep piece centered
             if len(self.piece) == 1 and len(rotated_piece) == 3:  # horizontal to vertical
-                new_px = self.px + 1  # shift right by 1 to center
-                new_py = self.py - 1  # shift up by 1 to center
+                new_px, new_py = self.px + 1, self.py - 1
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1)]
             elif len(self.piece) == 3 and len(rotated_piece) == 1:  # vertical to horizontal
-                new_px = self.px - 1  # shift left by 1 to center
-                new_py = self.py + 1  # shift down by 1 to center
+                new_px, new_py = self.px - 1, self.py + 1
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, 1)]
             else:
                 new_px, new_py = self.px, self.py
-                
-            # Try the centered rotation first
-            if not check_collision(self.board, rotated_piece, new_px, new_py):
-                self.piece = rotated_piece
-                self.px = new_px
-                self.py = new_py
-                return
-                
-            # If centered rotation fails, try wall kicks
-            wall_kicks = []
-            if len(self.piece) == 1:  # horizontal to vertical kicks
-                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1)]  # original, left, right, up
-            else:  # vertical to horizontal kicks
-                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, 1)]   # original, left, right, down
-                
+                wall_kicks = [(0, 0)]
+
             for kick_x, kick_y in wall_kicks:
-                test_px = new_px + kick_x
-                test_py = new_py + kick_y
+                test_px, test_py = new_px + kick_x, new_py + kick_y
                 if not check_collision(self.board, rotated_piece, test_px, test_py):
-                    self.piece = rotated_piece
-                    self.px = test_px
-                    self.py = test_py
+                    self.piece, self.px, self.py = rotated_piece, test_px, test_py
                     return
         else:
             rotated_piece = rotate_piece(self.piece)
@@ -264,98 +237,72 @@ intents.message_content = True
 intents.reactions = True
 bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True)
 
-games = {}      # user_id -> TetrisGame instance
-messages = {}   # user_id -> discord.Message instance
-tasks = {}      # user_id -> asyncio.Task for auto-drop
+games = {}
+messages = {}
+tasks = {}
 
-# reaction controls mapping
-REACTION_CONTROLS = {
-    '⬅️': 'a',   # Move left
-    '➡️': 'd',   # Move right
-    '⬇️': 's',   # Hard drop
-    '🔄': 'w',   # Rotate
-    '❌': 'q'    # Quit
-}
+REACTION_CONTROLS = {'⬅️': 'a', '➡️': 'd', '⬇️': 's', '🔄': 'w', '❌': 'q'}
+
+
+def log_game_score(game, user_id, user):
+    """Helper function to log game score"""
+    if game.score > 0 and not game._logged:
+        username = getattr(user, "display_name", str(user))
+        avatar_url = str(user.avatar.url) if user.avatar else ""
+        save_score(username, game.score, avatar_url, user_id,
+                   game.lines_cleared_total, game.get_game_time())
+        game._logged = True
 
 
 async def cleanup_user_game(user_id):
     """Clean up all resources for a specific user's game"""
-    # Log final score if game exists and hasn't been logged yet
     game = games.get(user_id)
-    if game and game.game_over and game.score > 0:
-        if not hasattr(game, "_logged") or not game._logged:
-            # try to get user from any available source
-            user = bot.get_user(user_id)
-            if not user:
-                # try to find user in guilds if not in cache
-                for guild in bot.guilds:
-                    user = guild.get_member(user_id)
-                    if user:
-                        break
+    if game and game.game_over:
+        user = bot.get_user(user_id) or next((guild.get_member(user_id)
+                                              for guild in bot.guilds if guild.get_member(user_id)), None)
+        if user:
+            log_game_score(game, user_id, user)
 
-            if user:
-                username = getattr(user, "display_name", str(user))
-                avatar_url = str(user.avatar.url) if user.avatar else ""
-                save_score(
-                    username,
-                    game.score,
-                    avatar_url,
-                    user_id,
-                    game.lines_cleared_total,
-                    game.get_game_time()
-                )
-                game._logged = True
-
-    # cancel auto-drop task
+    # Cancel task and clean up
     if user_id in tasks:
         tasks[user_id].cancel()
         tasks.pop(user_id, None)
 
-    # remove message reactions and delete message
+    # Clean up message
     if user_id in messages:
         try:
             await messages[user_id].clear_reactions()
-        except (discord.NotFound, discord.Forbidden):
-            pass
-        try:
             await messages[user_id].delete()
         except (discord.NotFound, discord.Forbidden):
             pass
         messages.pop(user_id, None)
 
-    # remove game instance
     games.pop(user_id, None)
 
 
 async def auto_drop(user_id):
-    """Auto-drop task - one per user"""
+    """Auto-drop task - smoother with reduced interval"""
     try:
         while user_id in games and not games[user_id].game_over:
             game = games.get(user_id)
             if not game or game.game_over:
                 break
 
-            # store state before drop
-            prev_state = (game.px, game.py, [row[:] for row in game.piece], [
-                          row[:] for row in game.board], game.score)
+            prev_score = game.score
             moved = game.drop()
-            new_state = (game.px, game.py, [row[:] for row in game.piece], [
-                         row[:] for row in game.board], game.score)
 
-            if moved or prev_state != new_state:
+            if moved or game.score != prev_score:
                 msg = messages.get(user_id)
                 if msg:
                     try:
                         await msg.edit(content=game.render())
                     except (discord.NotFound, discord.HTTPException):
                         break
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.7)  # Smoother autodrop
     except asyncio.CancelledError:
         pass
     finally:
-        # clean up task reference when done
-        if user_id in tasks:
-            tasks.pop(user_id, None)
+        tasks.pop(user_id, None)
 
 
 async def add_game_reactions(message):
@@ -376,54 +323,31 @@ async def update_display(ctx_or_msg, user_id):
     channel = ctx_or_msg.channel if hasattr(
         ctx_or_msg, 'channel') else ctx_or_msg
 
-    if msg:
-        try:
+    try:
+        if msg:
             await msg.edit(content=game.render())
-        except (discord.NotFound, discord.HTTPException):
+        else:
             new_msg = await channel.send(game.render())
             messages[user_id] = new_msg
             await add_game_reactions(new_msg)
-    else:
+    except (discord.NotFound, discord.HTTPException):
         new_msg = await channel.send(game.render())
         messages[user_id] = new_msg
         await add_game_reactions(new_msg)
 
-    # clear reactions if game is over
-    if game and game.game_over and msg:
-        try:
-            await msg.clear_reactions()
-        except (discord.NotFound, discord.Forbidden):
-            pass
+    # Handle game over
+    if game.game_over:
+        if msg:
+            try:
+                await msg.clear_reactions()
+            except (discord.NotFound, discord.Forbidden):
+                pass
 
-    # save score to log if game is over and not already saved
-    if game and game.game_over and game.score > 0:
-        # prevent duplicate log entries for the same game over
-        if not hasattr(game, "_logged") or not game._logged:
-            # get user information from context or message
-            user = None
-            if hasattr(ctx_or_msg, 'author'):
-                user = ctx_or_msg.author
-            elif hasattr(ctx_or_msg, 'channel'):
-                # try to get user from bot cache or guilds
-                user = bot.get_user(user_id)
-                if not user:
-                    for guild in bot.guilds:
-                        user = guild.get_member(user_id)
-                        if user:
-                            break
-
-            if user:
-                username = getattr(user, "display_name", str(user))
-                avatar_url = str(user.avatar.url) if user.avatar else ""
-                save_score(
-                    username,
-                    game.score,
-                    avatar_url,
-                    user_id,
-                    game.lines_cleared_total,
-                    game.get_game_time()
-                )
-                game._logged = True
+        # Log score
+        user = getattr(ctx_or_msg, 'author', None) or bot.get_user(user_id) or next(
+            (guild.get_member(user_id) for guild in bot.guilds if guild.get_member(user_id)), None)
+        if user:
+            log_game_score(game, user_id, user)
 
 
 @bot.event
@@ -436,27 +360,13 @@ async def on_ready():
 async def tris(ctx):
     user_id = ctx.author.id
 
-    # log final score if previous game existed and was completed
-    if user_id in games and games[user_id].game_over and games[user_id].score > 0:
-        if not hasattr(games[user_id], "_logged") or not games[user_id]._logged:
-            save_score(
-                ctx.author.display_name,
-                games[user_id].score,
-                str(ctx.author.avatar.url) if ctx.author.avatar else "",
-                user_id,
-                games[user_id].lines_cleared_total,
-                games[user_id].get_game_time()
-            )
-            games[user_id]._logged = True
+    # Log previous game if completed
+    if user_id in games and games[user_id].game_over:
+        log_game_score(games[user_id], user_id, ctx.author)
 
-    # clean up any existing game for this user
     await cleanup_user_game(user_id)
-
-    # start new game instance for this specific user
     games[user_id] = TetrisGame()
     await update_display(ctx, user_id)
-
-    # start auto-drop task for this user only
     tasks[user_id] = bot.loop.create_task(auto_drop(user_id))
 
 
@@ -548,7 +458,8 @@ async def highscores(ctx):
             f"**Best Score:** {score_val:,} pts ({date})\n"
             f"**Games:** {games_played} | **Avg Score:** {avg_score:,.0f}\n"
             f"**Best Lines:** {best_lines}{best_lines_date} | **Total:** {total_lines:,} | **Avg:** {avg_lines:.1f}\n"
-            f"**Longest game:** {best_time:.1f}s{best_time_date} | **Avg Time:** {avg_time:.1f}s"
+            f"**Longest game:** {best_time:.1f}s{best_time_date} | **Avg Time:** {avg_time:.1f}s\n"
+            f"**Total Time:** {total_time:.1f}s"
         )
 
         medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}."
@@ -571,13 +482,12 @@ async def on_message(message):
         commands_str = message.content[1:].lower()
         valid_commands = {'a', 'd', 's', 'w', 'q'}
 
-        # handle compound commands - affects only the sender's game
+        # Handle compound commands
         if all(c in valid_commands for c in commands_str):
-            user_id = message.author.id  # controls only for the user's game
+            user_id = message.author.id
             game = games.get(user_id)
             if game and not game.game_over:
-                prev_state = (game.px, game.py, [row[:] for row in game.piece], [
-                              row[:] for row in game.board], game.score)
+                prev_score = game.score
                 for cmd in commands_str:
                     if cmd == 'a':
                         game.move_left()
@@ -589,21 +499,10 @@ async def on_message(message):
                         game.rotate()
                     elif cmd == 'q':
                         game.game_over = True
-                        # ensure score is logged immediately when user quits
-                        if game.score > 0 and (not hasattr(game, "_logged") or not game._logged):
-                            save_score(
-                                message.author.display_name,
-                                game.score,
-                                str(message.author.avatar.url) if message.author.avatar else "",
-                                user_id,
-                                game.lines_cleared_total,
-                                game.get_game_time()
-                            )
-                            game._logged = True
+                        log_game_score(game, user_id, message.author)
                         break
-                new_state = (game.px, game.py, [row[:] for row in game.piece], [
-                             row[:] for row in game.board], game.score)
-                if prev_state != new_state or game.game_over:
+
+                if game.score != prev_score or game.game_over:
                     await update_display(message, user_id)
                 try:
                     await message.delete()
@@ -611,15 +510,13 @@ async def on_message(message):
                     pass
                 return
 
-        # clean up command messages
+        # Clean up command messages
         if commands_str in ['tris', 'a', 'd', 's', 'w', 'q', 'trishelp', 'highscores']:
             try:
                 await message.delete()
             except discord.Forbidden:
                 pass
 
-
-    # Easter egg: respond to 'uwu' in any message
     if "uwu" in message.content.lower():
         await message.channel.send("OwO what's this?")
 
@@ -629,31 +526,19 @@ async def on_message(message):
 @bot.event
 async def on_reaction_add(reaction, user):
     """Handle reaction-based game controls"""
-    if user.bot:
+    if user.bot or user.id not in messages or messages[user.id].id != reaction.message.id:
         return
 
-    # check if this is a game message
-    user_id = user.id
-    if user_id not in messages or messages[user_id].id != reaction.message.id:
-        return
-
-    # check if user has an active game
-    game = games.get(user_id)
+    game = games.get(user.id)
     if not game or game.game_over:
         return
 
-    # get the command from reaction
-    emoji = str(reaction.emoji)
-    if emoji not in REACTION_CONTROLS:
+    command = REACTION_CONTROLS.get(str(reaction.emoji))
+    if not command:
         return
 
-    command = REACTION_CONTROLS[emoji]
+    prev_score = game.score
 
-    # store state before action
-    prev_state = (game.px, game.py, [row[:] for row in game.piece], [
-                  row[:] for row in game.board], game.score)
-
-    # execute
     if command == 'a':
         game.move_left()
     elif command == 'd':
@@ -664,26 +549,11 @@ async def on_reaction_add(reaction, user):
         game.rotate()
     elif command == 'q':
         game.game_over = True
-        # ensure score is logged immediately when user quits via reaction
-        if game.score > 0 and (not hasattr(game, "_logged") or not game._logged):
-            save_score(
-                user.display_name,
-                game.score,
-                str(user.avatar.url) if user.avatar else "",
-                user_id,
-                game.lines_cleared_total,
-                game.get_game_time()
-            )
-            game._logged = True
+        log_game_score(game, user.id, user)
 
-    # check if state changed
-    new_state = (game.px, game.py, [row[:] for row in game.piece], [
-                 row[:] for row in game.board], game.score)
+    if game.score != prev_score or game.game_over:
+        await update_display(reaction.message, user.id)
 
-    if prev_state != new_state or game.game_over:
-        await update_display(reaction.message, user_id)
-
-    # remove the reaction for cleaner UI
     try:
         await reaction.remove(user)
     except (discord.NotFound, discord.Forbidden):
