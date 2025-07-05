@@ -20,6 +20,16 @@ def rotate_piece(piece):
     return [list(row) for row in zip(*piece[::-1])]
 
 
+def rotate_i_piece_center(piece):
+    """Special rotation for 3-cell I piece to rotate around center"""
+    if len(piece) == 1 and len(piece[0]) == 3:  # horizontal I
+        return [[1], [1], [1]]  # vertical I
+    elif len(piece) == 3 and len(piece[0]) == 1:  # vertical I
+        return [[1, 1, 1]]  # horizontal I
+    else:
+        return piece  # fallback
+
+
 def empty_board():
     return [[0] * WIDTH for _ in range(HEIGHT)]
 
@@ -144,14 +154,19 @@ class TetrisGame:
         self.game_over = False
         self.lines_cleared_total = 0
         self.start_time = time.time()
+        self.current_piece_type = None  # Track piece type
         self.spawn_piece()
 
     def spawn_piece(self):
-        self.piece = [row[:]
-                      for row in PIECES[random.choice(list(PIECES.keys()))]]
+        piece_type = random.choice(list(PIECES.keys()))
+        self.current_piece_type = piece_type
+        self.piece = [row[:] for row in PIECES[piece_type]]
         # random rotation
         for _ in range(random.randint(0, 3)):
-            self.piece = rotate_piece(self.piece)
+            if piece_type == 'I':
+                self.piece = rotate_i_piece_center(self.piece)
+            else:
+                self.piece = rotate_piece(self.piece)
         self.px = WIDTH // 2 - len(self.piece[0]) // 2
         self.py = 0
 
@@ -166,9 +181,45 @@ class TetrisGame:
     def rotate(self):
         if self.game_over:
             return
-        rotated_piece = rotate_piece(self.piece)
-        if not check_collision(self.board, rotated_piece, self.px, self.py):
-            self.piece = rotated_piece
+        
+        if self.current_piece_type == 'I':
+            rotated_piece = rotate_i_piece_center(self.piece)
+            # Calculate offset to keep piece centered
+            if len(self.piece) == 1 and len(rotated_piece) == 3:  # horizontal to vertical
+                new_px = self.px + 1  # shift right by 1 to center
+                new_py = self.py - 1  # shift up by 1 to center
+            elif len(self.piece) == 3 and len(rotated_piece) == 1:  # vertical to horizontal
+                new_px = self.px - 1  # shift left by 1 to center
+                new_py = self.py + 1  # shift down by 1 to center
+            else:
+                new_px, new_py = self.px, self.py
+                
+            # Try the centered rotation first
+            if not check_collision(self.board, rotated_piece, new_px, new_py):
+                self.piece = rotated_piece
+                self.px = new_px
+                self.py = new_py
+                return
+                
+            # If centered rotation fails, try wall kicks
+            wall_kicks = []
+            if len(self.piece) == 1:  # horizontal to vertical kicks
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1)]  # original, left, right, up
+            else:  # vertical to horizontal kicks
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, 1)]   # original, left, right, down
+                
+            for kick_x, kick_y in wall_kicks:
+                test_px = new_px + kick_x
+                test_py = new_py + kick_y
+                if not check_collision(self.board, rotated_piece, test_px, test_py):
+                    self.piece = rotated_piece
+                    self.px = test_px
+                    self.py = test_py
+                    return
+        else:
+            rotated_piece = rotate_piece(self.piece)
+            if not check_collision(self.board, rotated_piece, self.px, self.py):
+                self.piece = rotated_piece
 
     def drop(self):
         if self.game_over:
@@ -566,6 +617,11 @@ async def on_message(message):
                 await message.delete()
             except discord.Forbidden:
                 pass
+
+
+    # Easter egg: respond to 'uwu' in any message
+    if "uwu" in message.content.lower():
+        await message.channel.send("OwO what's this?")
 
     await bot.process_commands(message)
 
