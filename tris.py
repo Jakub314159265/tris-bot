@@ -113,7 +113,8 @@ def check_collision(board, piece, px, py):
                 bx, by = px + x, py + y  # to board coords
                 if bx < 0 or bx >= WIDTH or by >= HEIGHT:  # out of bounds
                     return True
-                if by >= 0 and board[by][bx]:  # overlap
+                # Only check board collision if piece is within visible area
+                if by >= 0 and board[by][bx]:  # overlap with existing pieces
                     return True
     return False
 
@@ -176,10 +177,10 @@ class TetrisGame:
             # calculate offset to keep piece centered
             if len(self.piece) == 1 and len(rotated_piece) == 3:  # horizontal to vertical
                 new_px, new_py = self.px + 1, self.py - 1
-                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1)]
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (-2, 0), (2, 0)]
             elif len(self.piece) == 3 and len(rotated_piece) == 1:  # vertical to horizontal
                 new_px, new_py = self.px - 1, self.py + 1
-                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, 1)]
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, 1), (0, -1), (-2, 0), (2, 0)]
             else:
                 new_px, new_py = self.px, self.py
                 wall_kicks = [(0, 0)]
@@ -189,10 +190,22 @@ class TetrisGame:
                 if not check_collision(self.board, rotated_piece, test_px, test_py):
                     self.piece, self.px, self.py = rotated_piece, test_px, test_py
                     return
+            # if no valid position found, just don't rotate
         else:
             rotated_piece = rotate_piece(self.piece)
+            # try basic rotation first
             if not check_collision(self.board, rotated_piece, self.px, self.py):
                 self.piece = rotated_piece
+                return
+            
+            # try wall kicks for L piece
+            wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1), (-1, -1), (1, -1)]
+            for kick_x, kick_y in wall_kicks:
+                test_px, test_py = self.px + kick_x, self.py + kick_y
+                if not check_collision(self.board, rotated_piece, test_px, test_py):
+                    self.piece, self.px, self.py = rotated_piece, test_px, test_py
+                    return
+            # if no valid position found, just don't rotate
 
     def drop(self):
         if self.game_over:
@@ -200,8 +213,9 @@ class TetrisGame:
         if not check_collision(self.board, self.piece, self.px, self.py + 1):
             self.py += 1
             return True
-        self.land_piece()
-        return False
+        else:
+            self.land_piece()
+            return False
 
     def hard_drop(self):
         if self.game_over:
@@ -216,9 +230,30 @@ class TetrisGame:
         self.board, lines_cleared = clear_lines(self.board)
         self.lines_cleared_total += lines_cleared
         self.score += (lines_cleared ** 2) * 100
-        self.spawn_piece()
-        if check_collision(self.board, self.piece, self.px, self.py + 1):
+        
+        # Generate the actual next piece that would spawn
+        next_piece_type = random.choice(list(PIECES.keys()))
+        next_piece = [row[:] for row in PIECES[next_piece_type]]
+        # Apply random rotation like in spawn_piece
+        for _ in range(random.randint(0, 3)):
+            if next_piece_type == 'I':
+                next_piece = rotate_i_piece_center(next_piece)
+            else:
+                next_piece = rotate_piece(next_piece)
+        
+        next_px = WIDTH // 2 - len(next_piece[0]) // 2
+        next_py = 0
+        
+        # Check if this actual next piece can spawn
+        if check_collision(self.board, next_piece, next_px, next_py):
             self.game_over = True
+            return
+            
+        # If no collision, spawn the piece we just generated
+        self.current_piece_type = next_piece_type
+        self.piece = next_piece
+        self.px = next_px
+        self.py = next_py
 
     def get_game_time(self):
         return time.time() - self.start_time
@@ -288,26 +323,36 @@ async def cleanup_user_game(user_id):
 async def auto_drop(user_id):
     """Auto-drop task - smoother with reduced interval"""
     try:
-        while user_id in games and not games[user_id].game_over:
+        while user_id in games:
             game = games.get(user_id)
             if not game or game.game_over:
                 break
 
             prev_score = game.score
+            prev_game_over = game.game_over
+            
             moved = game.drop()
 
-            if moved or game.score != prev_score:
+            # Check if game state changed (score, game over, or piece moved)
+            if moved or game.score != prev_score or game.game_over != prev_game_over:
                 msg = messages.get(user_id)
                 if msg:
                     try:
                         await msg.edit(content=game.render())
                     except (discord.NotFound, discord.HTTPException):
                         break
+                        
+            # Exit if game is over
+            if game.game_over:
+                break
+                
             await asyncio.sleep(0.7)  # Smoother autodrop
     except asyncio.CancelledError:
         pass
     finally:
-        tasks.pop(user_id, None)
+        # Clean up when task ends
+        if user_id in tasks:
+            tasks.pop(user_id, None)
 
 
 async def add_game_reactions(message):
@@ -340,8 +385,9 @@ async def update_display(ctx_or_msg, user_id):
         messages[user_id] = new_msg
         await add_game_reactions(new_msg)
 
-    # Handle game over
+    # Handle game over - clear reactions immediately and log score
     if game.game_over:
+        # Clear reactions immediately when game over is detected
         if msg:
             try:
                 await msg.clear_reactions()
@@ -353,6 +399,11 @@ async def update_display(ctx_or_msg, user_id):
             (guild.get_member(user_id) for guild in bot.guilds if guild.get_member(user_id)), None)
         if user:
             log_game_score(game, user_id, user)
+
+        # Cancel the auto-drop task to prevent further updates
+        if user_id in tasks:
+            tasks[user_id].cancel()
+            tasks.pop(user_id, None)
 
 
 @bot.event
@@ -458,10 +509,6 @@ async def score(ctx, *, user: discord.Member = None):
         if not top_scores:
             await ctx.send("No high scores yet")
             return
-        embed = discord.Embed(
-            title="🏆 Tris High Scores & Statistics",
-            color=0xffd700
-        )
         for i, score_entry in enumerate(top_scores):
             rank = i + 1
             username = score_entry["username"]
@@ -478,8 +525,6 @@ async def score(ctx, *, user: discord.Member = None):
             avg_score = score_val / games_played if games_played > 0 else 0
             avg_lines = total_lines / games_played if games_played > 0 else 0
             avg_time = total_time / games_played if games_played > 0 else 0
-            if i == 0 and avatar_url:
-                embed.set_thumbnail(url=avatar_url)
             stats_text = (
                 f"**Best Score:** {score_val:,} pts ({date})\n"
                 f"**Games:** {games_played} | **Avg Score:** {avg_score:,.0f}\n"
@@ -488,13 +533,15 @@ async def score(ctx, *, user: discord.Member = None):
                 f"**Total Time:** {total_time:.1f}s"
             )
             medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}."
-            embed.add_field(
-                name=f"{medal} {username}",
-                value=stats_text,
-                inline=False
+            embed = discord.Embed(
+                title=f"{medal} {username}",
+                description=stats_text,
+                color=0xffd700
             )
-        embed.set_footer(text=">w<")
-        await ctx.send(embed=embed)
+            if avatar_url:
+                embed.set_thumbnail(url=avatar_url)
+            embed.set_footer(text=">w<")
+            await ctx.send(embed=embed)
 
 
 @bot.event
@@ -542,7 +589,9 @@ async def on_message(message):
                 pass
 
     if "uwu" in message.content.lower():
-        await message.channel.send("OwO what's this?")
+        await message.channel.send("owo")
+    if "owo" in message.content.lower():
+        await message.channel.send("uwu")
 
     await bot.process_commands(message)
 
