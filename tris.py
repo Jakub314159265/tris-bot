@@ -173,7 +173,7 @@ class TetrisGame:
 
         if self.current_piece_type == 'I':
             rotated_piece = rotate_i_piece_center(self.piece)
-            # Calculate offset to keep piece centered
+            # calculate offset to keep piece centered
             if len(self.piece) == 1 and len(rotated_piece) == 3:  # horizontal to vertical
                 new_px, new_py = self.px + 1, self.py - 1
                 wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1)]
@@ -235,7 +235,12 @@ class TetrisGame:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
-bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True)
+bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True, help_command=None)
+# Custom !help command to redirect to !trishelp
+@bot.command(name="help")
+async def help_command(ctx):
+    """Show the Tris Bot help menu (same as !trishelp)"""
+    await trishelp_command(ctx)
 
 games = {}
 messages = {}
@@ -358,6 +363,7 @@ async def on_ready():
 
 @bot.command()
 async def tris(ctx):
+    """Start the game >w<"""
     user_id = ctx.author.id
 
     # Log previous game if completed
@@ -372,6 +378,7 @@ async def tris(ctx):
 
 @bot.command(name="trishelp")
 async def trishelp_command(ctx):
+    """Display detailed help"""
     help_text = """
 TRIS BOT COMMANDS
 
@@ -395,82 +402,99 @@ Game Controls:
 • Hard drop gives 2 points per cell dropped
 
 Stats:
-!highscores   - View top 10 scores
+!score   - View top 10 scores
 !trishelp     - Show this help menu
     """
     embed = discord.Embed(
         title="Tris Bot Help",
         description=help_text,
-        color=0x00ff00
+        color=0x00ffa0
     )
     embed.set_footer(text="uwu")
     await ctx.send(embed=embed)
 
 
 @bot.command()
-async def highscores(ctx):
-    """Display top 10 high scores with detailed statistics"""
-    scores = get_highscores(10)
-
-    if not scores:
-        await ctx.send("No high scores yet")
-        return
-
-    embed = discord.Embed(
-        title="🏆 Tris High Scores & Statistics",
-        color=0xffd700
-    )
-
-    for i, score_entry in enumerate(scores):
-        rank = i + 1
-        username = score_entry["username"]
-        score_val = score_entry["score"]
-        date = datetime.fromisoformat(
-            score_entry["timestamp"]).strftime("%m/%d")
-        avatar_url = score_entry.get("avatar_url", "")
-
-        # get statistics
-        games_played = score_entry.get("games_played", 1)
-        total_lines = score_entry.get("total_lines", 0)
-        total_time = score_entry.get("total_time", 0)
-        best_lines = score_entry.get("best_lines", 0)
-        best_time = score_entry.get("best_time", 0)
-
-        # get best achievement dates
-        best_lines_date = ""
-        best_time_date = ""
-        if "best_lines_timestamp" in score_entry:
-            best_lines_date = f" ({datetime.fromisoformat(score_entry['best_lines_timestamp']).strftime('%m/%d')})"
-        if "best_time_timestamp" in score_entry:
-            best_time_date = f" ({datetime.fromisoformat(score_entry['best_time_timestamp']).strftime('%m/%d')})"
-
-        # calculate averages
-        avg_score = score_val / games_played if games_played > 0 else 0
+async def score(ctx, *, user: discord.Member = None):
+    """Display top 10 high scores, or stats for a mentioned user."""
+    scores = load_scores()
+    if user:
+        # Try to match by user_id
+        entry = next((s for s in scores if s.get("user_id") == user.id), None)
+        if not entry:
+            await ctx.send(f"No stats found for {user.display_name}.")
+            return
+        embed = discord.Embed(
+            title=f"Stats for {entry['username']}",
+            color=0x00bfff
+        )
+        avatar_url = entry.get("avatar_url", "")
+        if avatar_url:
+            embed.set_thumbnail(url=avatar_url)
+        date = datetime.fromisoformat(entry["timestamp"]).strftime("%m/%d")
+        games_played = entry.get("games_played", 1)
+        total_lines = entry.get("total_lines", 0)
+        total_time = entry.get("total_time", 0)
+        best_lines = entry.get("best_lines", 0)
+        best_time = entry.get("best_time", 0)
+        best_lines_date = f" ({datetime.fromisoformat(entry['best_lines_timestamp']).strftime('%m/%d')})" if "best_lines_timestamp" in entry else ""
+        best_time_date = f" ({datetime.fromisoformat(entry['best_time_timestamp']).strftime('%m/%d')})" if "best_time_timestamp" in entry else ""
+        avg_score = entry["score"] / games_played if games_played > 0 else 0
         avg_lines = total_lines / games_played if games_played > 0 else 0
         avg_time = total_time / games_played if games_played > 0 else 0
-
-        # use avatar as thumbnail for first place
-        if i == 0 and avatar_url:
-            embed.set_thumbnail(url=avatar_url)
-
-        # format statistics with individual best dates
         stats_text = (
-            f"**Best Score:** {score_val:,} pts ({date})\n"
+            f"**Best Score:** {entry['score']:,} pts ({date})\n"
             f"**Games:** {games_played} | **Avg Score:** {avg_score:,.0f}\n"
             f"**Best Lines:** {best_lines}{best_lines_date} | **Total:** {total_lines:,} | **Avg:** {avg_lines:.1f}\n"
             f"**Longest game:** {best_time:.1f}s{best_time_date} | **Avg Time:** {avg_time:.1f}s\n"
             f"**Total Time:** {total_time:.1f}s"
         )
-
-        medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}."
-        embed.add_field(
-            name=f"{medal} {username}",
-            value=stats_text,
-            inline=False
+        embed.add_field(name="Statistics", value=stats_text, inline=False)
+        embed.set_footer(text=">w<")
+        await ctx.send(embed=embed)
+    else:
+        # Show top 10 scores as before
+        top_scores = get_highscores(10)
+        if not top_scores:
+            await ctx.send("No high scores yet")
+            return
+        embed = discord.Embed(
+            title="🏆 Tris High Scores & Statistics",
+            color=0xffd700
         )
-
-    embed.set_footer(text=">w<")
-    await ctx.send(embed=embed)
+        for i, score_entry in enumerate(top_scores):
+            rank = i + 1
+            username = score_entry["username"]
+            score_val = score_entry["score"]
+            date = datetime.fromisoformat(score_entry["timestamp"]).strftime("%m/%d")
+            avatar_url = score_entry.get("avatar_url", "")
+            games_played = score_entry.get("games_played", 1)
+            total_lines = score_entry.get("total_lines", 0)
+            total_time = score_entry.get("total_time", 0)
+            best_lines = score_entry.get("best_lines", 0)
+            best_time = score_entry.get("best_time", 0)
+            best_lines_date = f" ({datetime.fromisoformat(score_entry['best_lines_timestamp']).strftime('%m/%d')})" if "best_lines_timestamp" in score_entry else ""
+            best_time_date = f" ({datetime.fromisoformat(score_entry['best_time_timestamp']).strftime('%m/%d')})" if "best_time_timestamp" in score_entry else ""
+            avg_score = score_val / games_played if games_played > 0 else 0
+            avg_lines = total_lines / games_played if games_played > 0 else 0
+            avg_time = total_time / games_played if games_played > 0 else 0
+            if i == 0 and avatar_url:
+                embed.set_thumbnail(url=avatar_url)
+            stats_text = (
+                f"**Best Score:** {score_val:,} pts ({date})\n"
+                f"**Games:** {games_played} | **Avg Score:** {avg_score:,.0f}\n"
+                f"**Best Lines:** {best_lines}{best_lines_date} | **Total:** {total_lines:,} | **Avg:** {avg_lines:.1f}\n"
+                f"**Longest game:** {best_time:.1f}s{best_time_date} | **Avg Time:** {avg_time:.1f}s\n"
+                f"**Total Time:** {total_time:.1f}s"
+            )
+            medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}."
+            embed.add_field(
+                name=f"{medal} {username}",
+                value=stats_text,
+                inline=False
+            )
+        embed.set_footer(text=">w<")
+        await ctx.send(embed=embed)
 
 
 @bot.event
@@ -511,7 +535,7 @@ async def on_message(message):
                 return
 
         # Clean up command messages
-        if commands_str in ['tris', 'a', 'd', 's', 'w', 'q', 'trishelp', 'highscores']:
+        if commands_str in ['tris', 'a', 'd', 's', 'w', 'q', 'trishelp', 'score']:
             try:
                 await message.delete()
             except discord.Forbidden:
