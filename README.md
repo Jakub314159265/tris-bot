@@ -18,9 +18,10 @@ A simple Discord bot for playing a Tetris-like game in chat.
 - `!w` — Rotate piece
 - `!s` — Hard drop
 - `!q` — End current game
-- `!score` — Show top scores and statistics
+- `!score` — show top scores and statistics
     - `!score @<user>` — show score and data about this player
-- `!trishelp` — Show help
+- `!trishelp` — show help
+- `!setspeed` — set game speed serverwide
 
 Combine commands (e.g., `!aad`) for quick moves.
 

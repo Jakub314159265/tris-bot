@@ -283,6 +283,9 @@ tasks = {}
 
 REACTION_CONTROLS = {'⬅️': 'a', '➡️': 'd', '⬇️': 's', '🔄': 'w', '❌': 'q'}
 
+# Global drop speed (in seconds)
+DROP_SPEED = 0.7
+
 
 def log_game_score(game, user_id, user):
     """Helper function to log game score"""
@@ -339,6 +342,9 @@ async def auto_drop(user_id):
                 if msg:
                     try:
                         await msg.edit(content=game.render())
+                        # If game just ended, clear reactions immediately
+                        if game.game_over and not prev_game_over:
+                            await msg.clear_reactions()
                     except (discord.NotFound, discord.HTTPException):
                         break
                         
@@ -346,7 +352,7 @@ async def auto_drop(user_id):
             if game.game_over:
                 break
                 
-            await asyncio.sleep(0.7)  # Smoother autodrop
+            await asyncio.sleep(DROP_SPEED)  # Use configurable drop speed
     except asyncio.CancelledError:
         pass
     finally:
@@ -385,9 +391,9 @@ async def update_display(ctx_or_msg, user_id):
         messages[user_id] = new_msg
         await add_game_reactions(new_msg)
 
-    # Handle game over - clear reactions immediately and log score
+    # Handle game over - immediate cleanup
     if game.game_over:
-        # Clear reactions immediately when game over is detected
+        msg = messages.get(user_id)
         if msg:
             try:
                 await msg.clear_reactions()
@@ -399,8 +405,8 @@ async def update_display(ctx_or_msg, user_id):
             (guild.get_member(user_id) for guild in bot.guilds if guild.get_member(user_id)), None)
         if user:
             log_game_score(game, user_id, user)
-
-        # Cancel the auto-drop task to prevent further updates
+            
+        # Cancel auto-drop task to prevent further updates
         if user_id in tasks:
             tasks[user_id].cancel()
             tasks.pop(user_id, None)
@@ -455,6 +461,9 @@ Game Controls:
 Stats:
 !score   - View top 10 scores
 !trishelp     - Show this help menu
+
+Admin:
+!setspeed <seconds> - Set autodrop speed (admin only)
     """
     embed = discord.Embed(
         title="Tris Bot Help",
@@ -544,6 +553,29 @@ async def score(ctx, *, user: discord.Member = None):
             await ctx.send(embed=embed)
 
 
+@bot.command()
+async def setspeed(ctx, speed: float = None):
+    """Set the autodrop speed (admin only)"""
+    global DROP_SPEED
+    
+    # Check if user has admin permissions
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ You need administrator permissions to use this command.")
+        return
+    
+    if speed is None:
+        await ctx.send(f"Current autodrop speed: {DROP_SPEED:.2f} seconds")
+        return
+    
+    # Validate speed range
+    if speed < 0.1 or speed > 10.0:
+        await ctx.send("❌ Speed must be between 0.1 and 10.0 seconds.")
+        return
+    
+    DROP_SPEED = speed
+    await ctx.send(f"✅ Autodrop speed set to {speed:.2f} seconds for all games.")
+
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -582,7 +614,7 @@ async def on_message(message):
                 return
 
         # Clean up command messages
-        if commands_str in ['tris', 'a', 'd', 's', 'w', 'q', 'trishelp', 'score']:
+        if commands_str in ['tris', 'a', 'd', 's', 'w', 'q', 'trishelp', 'score', 'setspeed']:
             try:
                 await message.delete()
             except discord.Forbidden:
@@ -646,7 +678,7 @@ async def delall(ctx):
     status_msg = await ctx.send("Deleting all bot and command messages from this channel...")
     # list of recognized command prefixes for this bot
     command_prefixes = [
-        "!tris", "!a", "!d", "!s", "!w", "!q", "!trishelp", "!highscores", "!delall"
+        "!tris", "!a", "!d", "!s", "!w", "!q", "!trishelp", "!highscores", "!delall", "!setspeed"
     ]
     try:
         # only current channel
