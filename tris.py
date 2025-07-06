@@ -177,10 +177,12 @@ class TetrisGame:
             # calculate offset to keep piece centered
             if len(self.piece) == 1 and len(rotated_piece) == 3:  # horizontal to vertical
                 new_px, new_py = self.px + 1, self.py - 1
-                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (-2, 0), (2, 0)]
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1),
+                              (0, 1), (-2, 0), (2, 0)]
             elif len(self.piece) == 3 and len(rotated_piece) == 1:  # vertical to horizontal
                 new_px, new_py = self.px - 1, self.py + 1
-                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, 1), (0, -1), (-2, 0), (2, 0)]
+                wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, 1),
+                              (0, -1), (-2, 0), (2, 0)]
             else:
                 new_px, new_py = self.px, self.py
                 wall_kicks = [(0, 0)]
@@ -197,7 +199,7 @@ class TetrisGame:
             if not check_collision(self.board, rotated_piece, self.px, self.py):
                 self.piece = rotated_piece
                 return
-            
+
             # try wall kicks for L piece
             wall_kicks = [(0, 0), (-1, 0), (1, 0), (0, -1), (-1, -1), (1, -1)]
             for kick_x, kick_y in wall_kicks:
@@ -230,7 +232,7 @@ class TetrisGame:
         self.board, lines_cleared = clear_lines(self.board)
         self.lines_cleared_total += lines_cleared
         self.score += (lines_cleared ** 2) * 100
-        
+
         # Generate the actual next piece that would spawn
         next_piece_type = random.choice(list(PIECES.keys()))
         next_piece = [row[:] for row in PIECES[next_piece_type]]
@@ -240,15 +242,15 @@ class TetrisGame:
                 next_piece = rotate_i_piece_center(next_piece)
             else:
                 next_piece = rotate_piece(next_piece)
-        
+
         next_px = WIDTH // 2 - len(next_piece[0]) // 2
         next_py = 0
-        
+
         # Check if this actual next piece can spawn
         if check_collision(self.board, next_piece, next_px, next_py):
             self.game_over = True
             return
-            
+
         # If no collision, spawn the piece we just generated
         self.current_piece_type = next_piece_type
         self.piece = next_piece
@@ -270,8 +272,11 @@ class TetrisGame:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
-bot = commands.Bot(command_prefix="!", intents=intents, case_insensitive=True, help_command=None)
+bot = commands.Bot(command_prefix="!", intents=intents,
+                   case_insensitive=True, help_command=None)
 # Custom !help command to redirect to !trishelp
+
+
 @bot.command(name="help")
 async def help_command(ctx):
     """Show the Tris Bot help menu (same as !trishelp)"""
@@ -333,7 +338,7 @@ async def auto_drop(user_id):
 
             prev_score = game.score
             prev_game_over = game.game_over
-            
+
             moved = game.drop()
 
             # Check if game state changed (score, game over, or piece moved)
@@ -347,11 +352,11 @@ async def auto_drop(user_id):
                             await msg.clear_reactions()
                     except (discord.NotFound, discord.HTTPException):
                         break
-                        
+
             # Exit if game is over
             if game.game_over:
                 break
-                
+
             await asyncio.sleep(DROP_SPEED)  # Use configurable drop speed
     except asyncio.CancelledError:
         pass
@@ -405,7 +410,7 @@ async def update_display(ctx_or_msg, user_id):
             (guild.get_member(user_id) for guild in bot.guilds if guild.get_member(user_id)), None)
         if user:
             log_game_score(game, user_id, user)
-            
+
         # Cancel auto-drop task to prevent further updates
         if user_id in tasks:
             tasks[user_id].cancel()
@@ -522,7 +527,8 @@ async def score(ctx, *, user: discord.Member = None):
             rank = i + 1
             username = score_entry["username"]
             score_val = score_entry["score"]
-            date = datetime.fromisoformat(score_entry["timestamp"]).strftime("%m/%d")
+            date = datetime.fromisoformat(
+                score_entry["timestamp"]).strftime("%m/%d")
             avatar_url = score_entry.get("avatar_url", "")
             games_played = score_entry.get("games_played", 1)
             total_lines = score_entry.get("total_lines", 0)
@@ -557,21 +563,21 @@ async def score(ctx, *, user: discord.Member = None):
 async def setspeed(ctx, speed: float = None):
     """Set the autodrop speed (admin only)"""
     global DROP_SPEED
-    
+
     # Check if user has admin permissions
     if not ctx.author.guild_permissions.administrator:
         await ctx.send("❌ You need administrator permissions to use this command.")
         return
-    
+
     if speed is None:
         await ctx.send(f"Current autodrop speed: {DROP_SPEED:.2f} seconds")
         return
-    
+
     # Validate speed range
     if speed < 0.1 or speed > 10.0:
         await ctx.send("❌ Speed must be between 0.1 and 10.0 seconds.")
         return
-    
+
     DROP_SPEED = speed
     await ctx.send(f"✅ Autodrop speed set to {speed:.2f} seconds for all games.")
 
